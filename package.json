@@ -1,0 +1,36 @@
+{
+  "name": "ade-lms",
+  "version": "1.0.0",
+  "description": "ADE Learning Management System back-end",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SparrowAcst/ade-lms.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/SparrowAcst/ade-lms/issues"
+  },
+  "homepage": "https://github.com/SparrowAcst/ade-lms#readme",
+  "dependencies": {
+    "axios": "^1.3.4",
+    "busboy": "^1.6.0",
+    "crypto": "^1.0.1",
+    "deep-extend": "^0.6.0",
+    "express": "^4.18.2",
+    "fast-glob": "^3.2.12",
+    "fs-extra": "^11.1.0",
+    "googleapis": "^114.0.0",
+    "js-yaml": "^4.1.0",
+    "jsondiffpatch": "^0.4.1",
+    "lodash": "^4.17.21",
+    "moment": "^2.29.4",
+    "mongodb": "^4.13.0",
+    "nanomatch": "^1.2.13",
+    "uuid": "^9.0.0"
+  }
+}
