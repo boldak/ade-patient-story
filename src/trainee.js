@@ -261,7 +261,6 @@ const debugTraining = async (req, res) => {
 		let answers = options.answers
 
 		let trainingResults = getScore(answers, scoreRules)
-
 		let result = {
 		  "trainingId": pageId,
 		  "trainee": options.trainee,
@@ -269,6 +268,7 @@ const debugTraining = async (req, res) => {
 		  "expiresOn": new Date(),
 		  "submitedAt": new Date(),
 		  "score": trainingResults.score,
+		  "percents": trainingResults.percents,
 		  "state": trainingResults.state,
 		  "data": {
 		  	score: extend( {}, options.score, {total : trainingResults.score}),
@@ -276,7 +276,6 @@ const debugTraining = async (req, res) => {
 		  	traineeActivity: options.traineeActivity
 		  }
 		}
-
 		res.status(200).send( result )
 	
 	} catch (e) {

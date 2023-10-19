@@ -87,7 +87,7 @@ module.exports = (answers, scoreRules) => {
 
 		scoreRules.start = scoreRules.start || 0
 		scoreRules.acceptable = scoreRules.acceptable || 0
-
+		scoreRules.max = scoreRules.max || 1
 		let score = scoreRules.start
 
 		scoreRules.answers = normalizeRules(scoreRules.answers)
@@ -109,6 +109,8 @@ module.exports = (answers, scoreRules) => {
 		
 
 		result.score = score
+		// console.log(score, scoreRules.max, (100*score/scoreRules.max).toFixed(0))
+		result.percents = Number.parseInt((100*(score-scoreRules.start)/(scoreRules.max-scoreRules.start)).toFixed(0))
 		
 		result.state = (score >= scoreRules.acceptable) ? "accepted" : "rejected"
 

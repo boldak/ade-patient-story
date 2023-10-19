@@ -199,6 +199,7 @@ const getStat = async (req, res) => {
 			        state: "$_id",
 			        count: 1,
 			        score: 1,
+
 			      },
 			  },
 			]
@@ -275,6 +276,7 @@ const submitTraining = async (req, res) => {
 		  "expiresOn": new Date(),
 		  "submitedAt": new Date(),
 		  "score": trainingResults.score,
+		  "percents": trainingResults.percents,
 		  "state": trainingResults.state,
 		  "data": {
 		  	score: extend( {}, options.score, {total : trainingResults.score}),
@@ -283,6 +285,8 @@ const submitTraining = async (req, res) => {
 		  }
 		}
 
+		// console.log(result)
+		
 		await mongodb.replaceOne({
 			db: config.db,
 			collection: `${config.db.name}.${config.db.trainingCollection}`,
