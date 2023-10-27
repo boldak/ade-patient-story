@@ -286,7 +286,19 @@ const submitTraining = async (req, res) => {
 		}
 
 		// console.log(result)
-		
+
+		let historyRecord = {
+			  "trainingId": pageId,
+			  "trainee": options.trainee,
+			  "assignedAt": new Date(),
+			  "expiresOn": new Date(),
+			  "submitedAt": new Date(),
+			  "score": trainingResults.score,
+			  "percents": trainingResults.percents,
+			  "state": trainingResults.state,
+		}
+
+
 		await mongodb.replaceOne({
 			db: config.db,
 			collection: `${config.db.name}.${config.db.trainingCollection}`,
@@ -295,6 +307,12 @@ const submitTraining = async (req, res) => {
 			  	trainee: options.trainee,
 			},
 			data: result
+		})
+
+		await mongodb.insertAll({
+			db: config.db,
+			collection: `${config.db.name}.${config.db.trainingHistoryCollection}`,
+			data: [historyRecord]
 		})
 
 		res.status(200).send( result )

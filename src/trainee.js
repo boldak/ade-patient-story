@@ -54,6 +54,14 @@ const getTrainingStatus = async (req, res) => {
 						trainingId: options.trainingId 
 					}
 				},
+				{
+					$lookup:{
+					  from: config.db.trainingHistoryCollection,
+					  localField: "trainee",
+					  foreignField: "trainee",
+					  as: "history"
+					}
+				},
 	            {
 	                $project:{ 
 	                	_id: 0,
@@ -61,6 +69,13 @@ const getTrainingStatus = async (req, res) => {
 	            }	        ]
 		})
 
+		
+		result = result.map(r => {
+			r.history = r.history.filter( d => d.trainingId == r.trainingId)
+			return r
+		})
+
+		
 		res.send(result)
 	
 	} catch (e) {
