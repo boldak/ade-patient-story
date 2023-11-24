@@ -224,11 +224,13 @@ const replaceOne = async options => {
 		    useUnifiedTopology: true
 		})
 
-	    await client
+	    const res = await client
 	    		.db(conf.dbName)
 	    		.collection(conf.collectionName)
 	    		.replaceOne(options.filter, options.data, {upsert: true})
-
+	    
+	    return res
+	    		
 	} catch (e) {
 	
 		console.log(e.toString())
@@ -251,11 +253,13 @@ const updateOne = async options => {
 		    useUnifiedTopology: true
 		})
 	
-	    await client
+	    let res = await client
 	    		.db(conf.dbName)
 	    		.collection(conf.collectionName)
 	    		.updateOne(options.filter, { $set:options.data }, { upsert: true })
 	
+	    return res		
+
 	} catch (e) {
 	
 		console.log(e.toString())
@@ -295,6 +299,34 @@ const deleteOne = async options => {
 	}    
 }
 
+const deleteMany = async options => {
+	let client
+
+	try {
+		
+		const conf = normalize(options.collection)
+		client = await mongo.connect(options.db.url, {
+		    useNewUrlParser: true,
+		    useUnifiedTopology: true
+		})
+	
+		await client
+				.db(conf.dbName)
+				.collection(conf.collectionName)
+				.deleteMany(options.filter)
+	
+	} catch (e) {
+
+		console.log(e.toString())
+		throw new Error(e)
+
+	} finally {
+	
+		if(client) client.close()
+	
+	}    
+} 
+
 
 
 module.exports =  {
@@ -307,5 +339,6 @@ module.exports =  {
 	listCollections, 
 	drop,
 	aggregate_raw,
-	deleteOne	
+	deleteOne,
+	deleteMany	
 }
