@@ -420,6 +420,88 @@ const getList = async (req, res) => {
 }
 
 
+// const updateStory = async (req, res) => {
+
+//     try {
+
+//         let story = req.body.story
+//         let user = req.body.user
+
+//         let stories = await mongodb.aggregate({
+
+//             db: config.db,
+//             collection: `${config.db.name}.${config.db.docCollection}`,
+//             pipeline: [{
+//                 $match: {
+//                     patientId: story[DEFAULT_LOCALE].patientId
+//                 }
+//             }]
+//         })
+
+//         for (let i = 0; i < stories.length; i++) {
+
+//             s = stories[i]
+//             s.updatedAt = new Date()
+//             s.updatedBy = user
+
+//             await mongodb.updateOne({
+//                 db: config.db,
+//                 collection: `${config.db.name}.${config.db.docCollection}`,
+//                 filter: { id: s.id },
+//                 data: s
+//             })
+
+//             await mongodb.deleteMany({
+//                 db: config.db,
+//                 collection: `${config.db.name}.${config.db.tagCollection}`,
+//                 filter: { docId: s.id }
+//             })
+
+//         }
+
+
+//         for (let i = 0; i < LOCALES.length; i++) {
+//             let locale = LOCALES[i]
+
+//             let storyEntities = ((story[locale]) ? story[locale].storyEntities : []) || []
+//             let reviewEntities = ((story[locale]) ? story[locale].reviewEntities : []) || []
+
+//             storyEntities = storyEntities.map(e => {
+//                 e.field = "story"
+//                 e.docId = (story[locale]) ? story[locale].id : null
+//                 return e
+//             })
+
+//             reviewEntities = reviewEntities.map(e => {
+//                 e.field = "review"
+//                 e.docId = (story[locale]) ? story[locale].id : null
+//                 return e
+//             })
+
+
+//             let tags = storyEntities.concat(reviewEntities)
+
+//             if (tags.length > 0) {
+//                 await mongodb.insertAll({
+//                     db: config.db,
+//                     collection: `${config.db.name}.${config.db.tagCollection}`,
+//                     data: tags
+//                 })
+//             }
+
+//         }
+
+//         res.status(200).send()
+
+
+//     } catch (e) {
+
+//         res.status(200).send(e.toString())
+
+//     }
+
+// }
+
 const updateStory = async (req, res) => {
 
     try {
@@ -427,20 +509,22 @@ const updateStory = async (req, res) => {
         let story = req.body.story
         let user = req.body.user
 
-        let stories = await mongodb.aggregate({
+        // let stories = await mongodb.aggregate({
 
-            db: config.db,
-            collection: `${config.db.name}.${config.db.docCollection}`,
-            pipeline: [{
-                $match: {
-                    patientId: story[DEFAULT_LOCALE].patientId
-                }
-            }]
-        })
+        //     db: config.db,
+        //     collection: `${config.db.name}.${config.db.docCollection}`,
+        //     pipeline: [{
+        //         $match: {
+        //             patientId: story[DEFAULT_LOCALE].patientId
+        //         }
+        //     }]
+        // })
 
-        for (let i = 0; i < stories.length; i++) {
+        for (let i = 0; i < LOCALES.length; i++) {
 
-            s = stories[i]
+            s = story[LOCALES[i]]
+            if(!s) continue
+            
             s.updatedAt = new Date()
             s.updatedBy = user
 
