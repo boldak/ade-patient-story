@@ -7,7 +7,19 @@ const loadYaml = filename => YAML.load(fs.readFileSync(path.resolve(filename)).t
 
 const config = loadYaml(path.join(__dirname, "../.config/db/mongodb.conf.yml"))
 
-const { extend, keys, find, isArray, groupBy, remove, first } = require("lodash")
+const { 
+        extend, 
+        keys, 
+        find, 
+        isArray, 
+        groupBy, 
+        remove, 
+        first,
+        isUndefined,
+        isNull,
+        flattenDeep 
+} = require("lodash")
+
 
 const { loadForm } = require("./utils/docx-form")
 const uuid = require("uuid").v4
@@ -19,172 +31,210 @@ const TARGET_DIR = path.resolve('./.tmp/uploads/')
 
 
 const getCount = async (req, res) => {
-
     try {
 
-        const filter = req.body.filter || {}
+                const filter = req.body.filter || {}
 
-        const textSearch = filter.search || ""
-        const pid = filter.patientId || ".*"
+        const textSearch = (filter.hasText) ? filter.search || "" : ""
+        const pid = (filter.hasPatients) ? filter.patientId || ".*" : ".*"
+        const withoutTags = (isUndefined(filter.withoutTags) || isNull(filter.withoutTags)) ? true : filter.withoutTags 
+        const hasTags = (isUndefined(filter.hasTags) || isNull(filter.hasTags)) ? false : filter.hasTags 
+        const requiredDocuments = (filter.hasDocs) ? filter.requiredDocuments || [] : [] 
+        const tags = (hasTags) ? filter.tags || [] : []
+        
+        let tagSelector = (tags.length > 0) 
+            ? {
+                $match: {
+                    tag: {
+                        $in: tags,
+                    },
+                },
+            }
+            : { $match: {} }
 
-        let searchStage = (textSearch) ? [{
+
+
+        let searchStage = (textSearch) ? {
             $search: {
                 text: {
                     query: textSearch,
                     path: {
-                        wildcard: "*",
+                        wildcard: "*"
                     },
                     fuzzy: {},
                 },
             }
-        }] : []
-
-        // searchStage.push({
-        // 	$match:{
-        // 		"patientId": {
-        //                 $regex: pid
-        //             }
-        // 	}
-        // })
-
-        const tags = filter.tags || []
-
-        if (tags.length == 0) {
-            res.status(200).send({ count: 0 })
-        }
-
-        let tagsStage = []
-
-        let withoutTags = []
+        } : { $match: {} }
 
 
-        withoutTags = remove(tags, t => t == "Without tags")
-        tagsStage = {
-            $match: {
-                tag: {
-                    $in: tags
-                }
-            }
-        }
-
-
-        let unionStage = []
-
-
-        if (withoutTags.length > 0) {
-            unionStage = {
-                $unionWith: {
-                    coll: config.db.docCollection,
-                    pipeline: [{
-                            $match: {
-                                locale: DEFAULT_LOCALE,
-	                        },
-                            
-                        },
-
-                        {
-                            $lookup: {
-                                from: config.db.tagCollection,
-                                localField: "id",
-                                foreignField: "docId",
-                                as: "tags",
-                            },
-                        },
-                        {
-                            $match: {
-                                tags: {
-                                    $size: 0,
-                                },
-                            },
-                        },
-                        {
-                            $project: {
-                                _id: 0,
-                                patientId: 1,
-                            },
-                        },
-                    ],
+        let patientStage = [
+            {
+                $addFields: {
+                  docsCount: {
+                    $size: "$docs",
+                  },
+                  hasTags: {
+                    $cond: {
+                      if: {
+                        $eq: [
+                          {
+                            $type: "$tags",
+                          },
+                          "missing",
+                        ],
+                      },
+                      then: false,
+                      else: true,
+                    },
+                  },
+                },
+            },
+            {
+                $match: {
+                    docsCount: {
+                        $gt: 0,
+                    },
+                },
+            },
+            {
+                $match: {
+                    patientId: {
+                        $regex: pid,
+                    },
                 },
             }
-        }
+        ]
+
+        let docStage = (requiredDocuments.length > 0) 
+            ? [
+                {
+                $match: {
+                    "docs.type": {
+                        $all: requiredDocuments,
+                    },
+                },
+            }]  
+            : [] 
+
+        let hasTagStage = [{
+                $lookup: {
+                    from: config.db.docCollection,
+                    localField: "patientId",
+                    foreignField: "patientId",
+                    as: "docs",
+                },
+            },
+            {
+                $unwind: {
+                    path: "$docs",
+                },
+            },
+            {
+                $lookup: {
+                    from: config.db.tagCollection,
+                    localField: "docs.id",
+                    foreignField: "docId",
+                    as: "tags",
+                    pipeline: [
+
+                        searchStage,
+                        tagSelector
+                    ],
+                },
+            },
+            {
+                $unwind: {
+                    path: "$tags",
+                },
+            },
+
+        ]
+
+
+        let withoutTagStage = [
+            {
+                $match:{
+                    hasTags: false
+                }
+            }
+        ]
+
+        let aggregateStage = [
+                {
+                $group: {
+                    _id: "$patientId",
+                },
+            },
+            {
+                $lookup: {
+                    from: config.db.patientCollection,
+                    localField: "_id",
+                    foreignField: "patientId",
+                    as: "patient",
+                },
+            },
+            {
+                $unwind: {
+                    path: "$patient",
+                },
+            },
+            {
+                $replaceRoot: {
+                    newRoot: "$patient",
+                },
+            }
+        ]
+
 
 
         let pipeline = []
-            .concat(searchStage)
-            .concat(tagsStage)
-            .concat([
 
-                {
-                    $group: {
-                        _id: "$docId",
-                    },
-                },
-
-                {
-                    $addFields: {
-                        docId: "$_id",
-                    },
-                },
-
-                {
-                    $lookup: {
-                        from: config.db.docCollection,
-                        localField: "docId",
-                        foreignField: "id",
-                        as: "doc",
-                    },
-                },
-
-                {
-                    $unwind: {
-                        path: "$doc",
-                    },
-                },
-
-                {
-                    $replaceRoot: {
-                        newRoot: "$doc",
-                    },
-                },
-
-                {
-                    $match: {
-                        locale: DEFAULT_LOCALE,
-                        "patientId": {
-	                        $regex: pid
-	                    }
+        if(hasTags){
+            
+            if(withoutTags){
+                pipeline = pipeline.concat(patientStage).concat(docStage).concat(hasTagStage).concat([
+                    {
+                        $unionWith:{
+                            coll: config.db.patientCollection,
+                            pipeline: [].concat(patientStage).concat(docStage).concat(withoutTagStage)
+                        }    
                     }
-                },
+                ])
+            } else {
+                pipeline = pipeline.concat(patientStage).concat(docStage).concat(hasTagStage)
+            }
+        
+        } else {
+        
+            if(withoutTags){
+                pipeline = pipeline.concat(patientStage).concat(docStage).concat(withoutTagStage)
+            } else {
+                pipeline = pipeline.concat(patientStage).concat(docStage)       
+            }
+        }
 
-                {
-                    $project: {
-                        _id: 0,
-                        id: 1,
-                        patientId: 1,
+        pipeline = pipeline
+                .concat([
+                    {
+                        $group:{
+                            _id: "$patientId"
+                        }
                     },
-                },
-            ])
-            .concat(unionStage)
-            .concat([
-            	{
-                	$match:{
-                		"patientId": {
-	                        $regex: pid
-	                     }
-                	}
-                },
-            ])
-            .concat([{
-                $count: "count"
-            }])
+                    {
+                        $count: "count"
+                    }
+                ])
+
+        // console.log(JSON.stringify(pipeline))
 
         let result = await mongodb.aggregate({
 
             db: config.db,
-            collection: `${config.db.name}.${config.db.tagCollection}`,
+            collection: `${config.db.name}.${config.db.patientCollection}`,
             pipeline
         })
 
+        
         res.status(200).send(result[0])
 
     } catch (e) {
@@ -204,213 +254,227 @@ const getList = async (req, res) => {
 
         const filter = req.body.filter || {}
 
-        const textSearch = filter.search || ""
-        const pid = filter.patientId || ".*"
+        const textSearch = (filter.hasText) ? filter.search || "" : ""
+        const pid = (filter.hasPatients) ? filter.patientId || ".*" : ".*"
+        const withoutTags = (isUndefined(filter.withoutTags) || isNull(filter.withoutTags)) ? true : filter.withoutTags 
+        const hasTags = (isUndefined(filter.hasTags) || isNull(filter.hasTags)) ? false : filter.hasTags 
+        const requiredDocuments = (filter.hasDocs) ? filter.requiredDocuments || [] : [] 
+        const tags = (hasTags) ? filter.tags || [] : []
+        
+        let tagSelector = (tags.length > 0) 
+            ? {
+                $match: {
+                    tag: {
+                        $in: tags,
+                    },
+                },
+            }
+            : { $match: {} }
 
 
-        let searchStage = (textSearch) ? [{
+
+        let searchStage = (textSearch) ? {
             $search: {
                 text: {
                     query: textSearch,
-                    path:{
-                    	wildcard: "*"
+                    path: {
+                        wildcard: "*"
                     },
                     fuzzy: {},
                 },
             }
-        }] : []
-
-        // searchStage.push({
-        // 	$match:{
-        // 		"patientId": {
-        //             $regex: pid
-        //         }
-        // 	}
-        // })
-
-        const tags = filter.tags || []
-
-        let tagsStage = []
-
-        let withoutTags = []
+        } : { $match: {} }
 
 
-        withoutTags = remove(tags, t => t == "Without tags")
-        tagsStage = {
-            $match: {
-                tag: {
-                    $in: tags
-                }
+        let patientStage = [
+            {
+                $addFields: {
+                  docsCount: {
+                    $size: "$docs",
+                  },
+                  hasTags: {
+                    $cond: {
+                      if: {
+                        $eq: [
+                          {
+                            $type: "$tags",
+                          },
+                          "missing",
+                        ],
+                      },
+                      then: false,
+                      else: true,
+                    },
+                  },
+                },
+            },
+            {
+                $match: {
+                    docsCount: {
+                        $gt: 0,
+                    },
+                },
+            },
+            {
+                $match: {
+                    patientId: {
+                        $regex: pid,
+                    },
+                },
             }
-        }
+        ]
 
+        let docStage = (requiredDocuments.length > 0) 
+            ? [
+                {
+                $match: {
+                    "docs.type": {
+                        $all: requiredDocuments,
+                    },
+                },
+            }]  
+            : [] 
 
-        let unionStage = []
+        let hasTagStage = [{
+                $lookup: {
+                    from: config.db.docCollection,
+                    localField: "patientId",
+                    foreignField: "patientId",
+                    as: "docs",
+                },
+            },
+            {
+                $unwind: {
+                    path: "$docs",
+                },
+            },
+            {
+                $lookup: {
+                    from: config.db.tagCollection,
+                    localField: "docs.id",
+                    foreignField: "docId",
+                    as: "tags",
+                    pipeline: [
 
-        if (withoutTags.length > 0) {
-            unionStage = {
-                $unionWith: {
-                    coll: config.db.docCollection,
-                    pipeline: [{
-                            $match: {
-                                locale: DEFAULT_LOCALE
-                            },
-                            
-                        },
-                        {
-                            $lookup: {
-                                from: config.db.tagCollection,
-                                localField: "id",
-                                foreignField: "docId",
-                                as: "tags",
-                            },
-                        },
-                        {
-                            $match: {
-                                tags: {
-                                    $size: 0,
-                                },
-                            },
-                        },
-                        {
-                            $project: {
-                                _id: 0,
-                                id: 1,
-                                lockedBy: 1,
-                                lockedAt: 1,
-                                patientId: 1,
-                                updatedAt: 1
-                            },
-                        },
+                        searchStage,
+                        tagSelector
                     ],
                 },
+            },
+            {
+                $unwind: {
+                    path: "$tags",
+                },
+            },
+
+        ]
+
+
+        let withoutTagStage = [
+            {
+                $match:{
+                    hasTags: false
+                }
+            }
+        ]
+
+        let aggregateStage = [
+                {
+                $group: {
+                    _id: "$patientId",
+                },
+            },
+            {
+                $lookup: {
+                    from: config.db.patientCollection,
+                    localField: "_id",
+                    foreignField: "patientId",
+                    as: "patient",
+                },
+            },
+            {
+                $unwind: {
+                    path: "$patient",
+                },
+            },
+            {
+                $replaceRoot: {
+                    newRoot: "$patient",
+                },
+            }
+        ]
+
+
+
+        let pipeline = []
+
+        if(hasTags){
+            
+            if(withoutTags){
+                pipeline = pipeline.concat(patientStage).concat(docStage).concat(hasTagStage).concat([
+                    {
+                        $unionWith:{
+                            coll: config.db.patientCollection,
+                            pipeline: [].concat(patientStage).concat(docStage).concat(withoutTagStage)
+                        }    
+                    }
+                ])
+            } else {
+                pipeline = pipeline.concat(patientStage).concat(docStage).concat(hasTagStage)
+            }
+        
+        } else {
+        
+            if(withoutTags){
+                pipeline = pipeline.concat(patientStage).concat(docStage).concat(withoutTagStage)
+            } else {
+                pipeline = pipeline.concat(patientStage).concat(docStage)       
             }
         }
 
-        let pipeline = []
-            .concat(searchStage)
-            .concat(tagsStage)
-            .concat([
+        pipeline = pipeline
+                .concat(aggregateStage)
+                .concat([
 
-                {
-                    $group: {
-                        _id: "$docId",
+                    {
+                        $sort: {
+                            updatedAt: -1,
+                        },
                     },
-                },
 
-                {
-                    $addFields: {
-                        docId: "$_id",
+                    {
+                        $skip: pagination.skip,
                     },
-                },
 
-                {
-                    $lookup: {
-                        from: config.db.docCollection,
-                        localField: "docId",
-                        foreignField: "id",
-                        as: "doc",
-                    },
-                },
-
-                {
-                    $unwind: {
-                        path: "$doc",
-                    },
-                },
-
-                {
-                    $replaceRoot: {
-                        newRoot: "$doc",
-                    },
-                },
-
-                {
-                    $match: {
-                        locale: DEFAULT_LOCALE,
-                        "patientId": {
-	                        $regex: pid
-	                     }   
+                    {
+                        $limit: pagination.limit,
                     }
-                },
 
-                {
-                    $project: {
-                        // _id: 0,
-                        id: 1,
-                        lockedBy: 1,
-                        lockedAt: 1,
-                        patientId: 1,
-                        updatedAt: 1
-                    },
-                },
-            ])
-            .concat(unionStage)
-            .concat([{
-                    $lookup: {
-                        from: config.db.tagCollection,
-                        localField: "id",
-                        foreignField: "docId",
-                        as: "tags",
-                    },
-                },
-                {
-                	$match:{
-                		"patientId": {
-	                        $regex: pid
-	                     }
-                	}
-                },
-                {
-                    $project: {
-                        // _id: 0,
-                        story: 0,
-                        review: 0
-                    },
-                },
-            ])
-            .concat([
+                ])
 
-                {
-                    $sort: {
-                        updatedAt: -1,
-                        // _id: -1
-                    },
-                },
-
-                {
-                    $skip: pagination.skip,
-                },
-
-                {
-                    $limit: pagination.limit,
-                }
-
-            ])
-
-
-        // console.log(JSON.stringify(pipeline))
 
         let result = await mongodb.aggregate({
 
             db: config.db,
-            collection: `${config.db.name}.${config.db.tagCollection}`,
+            collection: `${config.db.name}.${config.db.patientCollection}`,
             pipeline
         })
 
         result = result.map(r => {
 
-            let tags = groupBy(r.tags, t => t.tag)
+            let tagArray = flattenDeep(r.tags)
+            let tags = groupBy(tagArray, t => t.tag)
 
             tags = keys(tags).map(key => ({
                 tag: key,
-                count: r.tags.filter(t => t.tag == key).length
+                count: tagArray.filter(t => t.tag == key).length
             }))
 
             r.tags = tags
 
             return r
         })
+
 
         res.status(200).send(result)
 
@@ -420,113 +484,36 @@ const getList = async (req, res) => {
 }
 
 
-// const updateStory = async (req, res) => {
-
-//     try {
-
-//         let story = req.body.story
-//         let user = req.body.user
-
-//         let stories = await mongodb.aggregate({
-
-//             db: config.db,
-//             collection: `${config.db.name}.${config.db.docCollection}`,
-//             pipeline: [{
-//                 $match: {
-//                     patientId: story[DEFAULT_LOCALE].patientId
-//                 }
-//             }]
-//         })
-
-//         for (let i = 0; i < stories.length; i++) {
-
-//             s = stories[i]
-//             s.updatedAt = new Date()
-//             s.updatedBy = user
-
-//             await mongodb.updateOne({
-//                 db: config.db,
-//                 collection: `${config.db.name}.${config.db.docCollection}`,
-//                 filter: { id: s.id },
-//                 data: s
-//             })
-
-//             await mongodb.deleteMany({
-//                 db: config.db,
-//                 collection: `${config.db.name}.${config.db.tagCollection}`,
-//                 filter: { docId: s.id }
-//             })
-
-//         }
-
-
-//         for (let i = 0; i < LOCALES.length; i++) {
-//             let locale = LOCALES[i]
-
-//             let storyEntities = ((story[locale]) ? story[locale].storyEntities : []) || []
-//             let reviewEntities = ((story[locale]) ? story[locale].reviewEntities : []) || []
-
-//             storyEntities = storyEntities.map(e => {
-//                 e.field = "story"
-//                 e.docId = (story[locale]) ? story[locale].id : null
-//                 return e
-//             })
-
-//             reviewEntities = reviewEntities.map(e => {
-//                 e.field = "review"
-//                 e.docId = (story[locale]) ? story[locale].id : null
-//                 return e
-//             })
-
-
-//             let tags = storyEntities.concat(reviewEntities)
-
-//             if (tags.length > 0) {
-//                 await mongodb.insertAll({
-//                     db: config.db,
-//                     collection: `${config.db.name}.${config.db.tagCollection}`,
-//                     data: tags
-//                 })
-//             }
-
-//         }
-
-//         res.status(200).send()
-
-
-//     } catch (e) {
-
-//         res.status(200).send(e.toString())
-
-//     }
-
-// }
-
 const updateStory = async (req, res) => {
 
     try {
 
         let story = req.body.story
         let user = req.body.user
+        let patientId = story.patientId
 
-        // let stories = await mongodb.aggregate({
+        let patientRecord = await mongodb.aggregate({
+            db: config.db,
+            collection: `${config.db.name}.${config.db.patientCollection}`,
+            pipeline: [{
+                $match: {
+                    patientId
+                },
+            }, ]
+        })
 
-        //     db: config.db,
-        //     collection: `${config.db.name}.${config.db.docCollection}`,
-        //     pipeline: [{
-        //         $match: {
-        //             patientId: story[DEFAULT_LOCALE].patientId
-        //         }
-        //     }]
-        // })
+        patientRecord = first(patientRecord)
 
-        for (let i = 0; i < LOCALES.length; i++) {
+        patientRecord.updatedAt = new Date()
+        patientRecord.updatedBy = user
 
-            s = story[LOCALES[i]]
-            if(!s) continue
-            
-            s.updatedAt = new Date()
-            s.updatedBy = user
+        for (let i = 0; i < story.docs.length; i++) {
+
+            s = story.docs[i]
+            if (!s) continue
+
+            // s.updatedAt = new Date()
+            // s.updatedBy = user
 
             await mongodb.updateOne({
                 db: config.db,
@@ -543,22 +530,22 @@ const updateStory = async (req, res) => {
 
         }
 
+        let foundedTags = []
 
-        for (let i = 0; i < LOCALES.length; i++) {
-            let locale = LOCALES[i]
-
-            let storyEntities = ((story[locale]) ? story[locale].storyEntities : []) || []
-            let reviewEntities = ((story[locale]) ? story[locale].reviewEntities : []) || []
+        for (let i = 0; i < story.docs.length; i++) {
+            
+            let storyEntities = ((story.docs[i]) ? story.docs[i].storyEntities : []) || []
+            let reviewEntities = ((story.docs[i]) ? story.docs[i].reviewEntities : []) || []
 
             storyEntities = storyEntities.map(e => {
                 e.field = "story"
-                e.docId = (story[locale]) ? story[locale].id : null
+                e.docId = (story.docs[i]) ? story.docs[i].id : null
                 return e
             })
 
             reviewEntities = reviewEntities.map(e => {
                 e.field = "review"
-                e.docId = (story[locale]) ? story[locale].id : null
+                e.docId = (story.docs[i]) ? story.docs[i].id : null
                 return e
             })
 
@@ -573,7 +560,34 @@ const updateStory = async (req, res) => {
                 })
             }
 
+            foundedTags = foundedTags.concat(tags)
+
         }
+
+        // console.log(foundedTags)
+        
+        let tags = groupBy(foundedTags, t => t.tag)
+
+        tags = keys(tags).map(key => ({
+            tag: key,
+            count: foundedTags.filter(t => t.tag == key).length
+        }))
+
+        // console.log(tags)
+
+        if(tags.length == 0){
+            delete patientRecord.tags
+        } else {
+            patientRecord.tags = tags
+        }
+
+        await mongodb.replaceOne({
+                db: config.db,
+                collection: `${config.db.name}.${config.db.patientCollection}`,
+                filter: { patientId },
+                data: patientRecord
+            })
+
 
         res.status(200).send()
 
@@ -594,82 +608,193 @@ const getStory = async (req, res) => {
         const patientId = req.body.patientId
         const user = req.body.user
 
-        let result = await mongodb.aggregate({
+        const pipeline = [{
+                $match: {
+                    patientId
+                },
+            },
+            {
+                $lookup: {
+                    from: `${config.db.examCollection}`,
+                    localField: "patientId",
+                    foreignField: "patientId",
+                    as: "ex",
+                },
+            },
+            {
+                $unwind: {
+                    path: "$ex",
+                },
+            },
+            {
+                $lookup: {
+                    from: `${config.db.recordCollection}`,
+                    localField: "ex.id",
+                    foreignField: "examination_id",
+                    as: "records",
+                },
+            },
+            {
+                $unwind: {
+                    path: "$records",
+                },
+            },
+            {
+                $group: {
+                    _id: "$patientId",
+                    patientId: {
+                        $first: "$patientId",
+                    },
+                    examinationsCount: {
+                        $first: "$examinationsCount",
+                    },
+                    lockedAt: {
+                        $first: "$lockedAt",
+                    },
+                    lockedBy: {
+                        $first: "$lockedBy",
+                    },
+
+                    records: {
+                        $push: {
+                            examinationId: "$records.examination_id",
+                            createdAt: "$records.file_created_at",
+                            type: "$records.record_type",
+                            spot: "$records.record_spot",
+                            side: "$records.record_body_side",
+                            position: "$records.record_body_position",
+                        },
+                    },
+                },
+            },
+            {
+                $lookup: {
+                    from: "docs",
+                    localField: "patientId",
+                    foreignField: "patientId",
+                    as: "docs",
+                },
+            },
+            {
+                $unwind: {
+                    path: "$docs",
+                },
+            },
+            {
+                $addFields: {
+                    "docs.examinationsCount": "$examinationsCount",
+                    "docs.records": "$records",
+                    "docs.lockedAt": "$lockedAt",
+                    "docs.lockedBy": "$lockedBy",
+                },
+            },
+            {
+                $replaceRoot: {
+                    newRoot: "$docs",
+                },
+            },
+            {
+                $lookup: {
+                    from: `${config.db.tagCollection}`,
+                    localField: "id",
+                    foreignField: "docId",
+                    as: "tags",
+                },
+            },
+            {
+                $addFields: {
+                    storyEntities: {
+                        $filter: {
+                            input: "$tags",
+                            as: "item",
+                            cond: {
+                                $eq: ["$$item.field", "story"],
+                            },
+                        },
+                    },
+                    reviewEntities: {
+                        $filter: {
+                            input: "$tags",
+                            as: "item",
+                            cond: {
+                                $eq: ["$$item.field", "review"],
+                            },
+                        },
+                    },
+                },
+            },
+            {
+                $project: {
+                    _id: 0,
+                    tags: 0,
+                },
+            },
+            {
+                $group: {
+                    _id: "$patientId",
+                    lockedAt: {
+                        $first: "$lockedAt"
+                    },
+                    lockedBy: {
+                        $first: "$lockedBy"
+                    },
+                    examinationsCount: {
+                        $first: "$examinationsCount",
+                    },
+                    records: {
+                        $first: "$records",
+                    },
+                    docs: {
+                        $push: "$$ROOT",
+                    },
+                },
+            },
+            {
+                $addFields: {
+                    patientId: "$_id",
+                },
+            },
+        ]
+
+         let result = await mongodb.aggregate({
 
             db: config.db,
-            collection: `${config.db.name}.${config.db.docCollection}`,
-            pipeline: [{
-                    $match: {
-                        patientId
-                    },
-                },
-                {
-                    $lookup: {
-                        from: config.db.tagCollection,
-                        localField: "id",
-                        foreignField: "docId",
-                        as: "tags",
-                    },
-                },
-                {
-                    $addFields: {
-                        storyEntities: {
-                            $filter: {
-                                input: "$tags",
-                                as: "item",
-                                cond: {
-                                    $eq: ["$$item.field", "story"],
-                                },
-                            },
-                        },
-                        reviewEntities: {
-                            $filter: {
-                                input: "$tags",
-                                as: "item",
-                                cond: {
-                                    $eq: ["$$item.field", "review"],
-                                },
-                            },
-                        },
-                    },
-                },
-                {
-                    $project: {
-                        _id: 0,
-                        tags: 0,
-                    },
-                },
-            ]
+            collection: `${config.db.name}.${config.db.patientCollection}`,
+            pipeline
+
         })
 
-        if (first(result) && !first(result).lockedBy) {
-            for (let i = 0; i < result.length; i++) {
+        let patientRecord = await mongodb.aggregate({
+            db: config.db,
+            collection: `${config.db.name}.${config.db.patientCollection}`,
+            pipeline: [{
+                $match: {
+                    patientId
+                },
+            }, ]
+        })
 
-                let r = result[i]
+        patientRecord = first(patientRecord)
 
-                r.lockedBy = user
-                r.lockedAt = new Date()
+        if (patientRecord && !patientRecord.lockedBy) {
 
-                let data = extend({}, r)
-                delete data.storyEntities
-                delete data.reviewEntities
-
-                await mongodb.updateOne({
-                    db: config.db,
-                    collection: `${config.db.name}.${config.db.docCollection}`,
-                    filter: { id: data.id },
-                    data
-                })
-
-            }
+            patientRecord.lockedBy = user
+            patientRecord.lockedAt = new Date()
+            await mongodb.updateOne({
+                db: config.db,
+                collection: `${config.db.name}.${config.db.patientCollection}`,
+                filter: { patientId: patientRecord.patientId },
+                data: patientRecord
+            })
         }
 
-        let story = {}
-        LOCALES.forEach(locale => {
-            story[locale] = find(result, r => r.locale == locale)
-        })
+        result = result[0] || {}
+            
+        result.lockedBy = patientRecord.lockedBy
+        result.lockedAt = patientRecord.lockedAt
+        
 
-        res.status(200).send(story)
+        res.status(200).send(result)
 
     } catch (e) {
 
@@ -686,36 +811,30 @@ const releaseStory = async (req, res) => {
         const patientId = req.body.patientId
         const user = req.body.user
 
-        let result = await mongodb.aggregate({
-
+        let patientRecord = await mongodb.aggregate({
             db: config.db,
-            collection: `${config.db.name}.${config.db.docCollection}`,
+            collection: `${config.db.name}.${config.db.patientCollection}`,
             pipeline: [{
-                    $match: {
-                        patientId
-                    },
+                $match: {
+                    patientId
                 },
-                {
-                    $project: {
-                        _id: 0,
-                    },
-                },
-            ]
+            }, ]
         })
 
-        for (let i = 0; i < result.length; i++) {
+        patientRecord = first(patientRecord)
 
-            let r = result[i]
-            r.lockedBy = null
-            r.lockedAt = null
+        if (patientRecord && patientRecord.lockedBy) {
 
-            let op = await mongodb.updateOne({
+            patientRecord.lockedBy = null
+            patientRecord.lockedAt = null
+            
+            await mongodb.updateOne({
                 db: config.db,
-                collection: `${config.db.name}.${config.db.docCollection}`,
-                filter: { id: r.id },
-                data: r
+                collection: `${config.db.name}.${config.db.patientCollection}`,
+                filter: { patientId },
+                data: patientRecord
             })
-
+        
         }
 
         res.status(200).send()
@@ -729,70 +848,72 @@ const releaseStory = async (req, res) => {
 }
 
 
-const createStory = async (req, res) => {
+const createSAF = async (req, res) => {
     try {
+        
+        const user = req.body.user
         let filename = req.body.filename
-        let filepath = path.resolve(TARGET_DIR, filename)
+        let url = req.body.url
+        let patientId = path.basename(filename,".pdf")
+       
+        let patientRecord = await mongodb.aggregate({
+            db: config.db,
+            collection: `${config.db.name}.${config.db.patientCollection}`,
+            pipeline: [{
+                $match: {
+                    patientId: patientId
+                },
+            }, ]
+        })
 
-        let story = await loadForm(filepath)
-        if (story.validation != true) {
+        patientRecord = first(patientRecord)
+
+        if (!patientRecord) {
+            let story = {
+                validation: `Cannot attach the Sound Assessment Form. Patient code "${patientId}" not found.`
+            }
             res.status(200).send(story)
             return
         }
 
+        
+        let documentType = "Sound Assessment Form"
 
-        let stored = await mongodb.aggregate({
+        let existedDoc = find( patientRecord.docs, d => d.type == documentType )
 
-            db: config.db,
-            collection: `${config.db.name}.${config.db.docCollection}`,
-            pipeline: [{
-                    $match: {
-                        patientId: story.patientId
-                    },
-                },
-
-                {
-                    $lookup: {
-                        from: config.db.tagCollection,
-                        localField: "id",
-                        foreignField: "docId",
-                        as: "tags",
-                    },
-                },
-                {
-                    $set: {
-                        tags: {
-                            $size: "$tags",
-                        },
-                    },
-                },
-            ]
-        })
-
-        let storedDefault = find(stored, s => s.locale == DEFAULT_LOCALE)
-
-        if (storedDefault && storedDefault.tags > 0) {
-            res.status(200).send({
-                validation: `Story for ${story.patientId} already exists and annotated.`,
-                exists: true
-            })
-            return
+        if(existedDoc){
+            existedDoc.url = url
+        } else {
+            existedDoc = {
+                id: uuid(),
+                patientId,
+                type: documentType,
+                url    
+            }
+            patientRecord.docs.push(existedDoc)
         }
-
-        let createdStory = find(stored, s => s.locale == story.locale)
-
-        story.id = (createdStory) ? createdStory.id : uuid()
-
+        
         await mongodb.replaceOne({
             db: config.db,
             collection: `${config.db.name}.${config.db.docCollection}`,
-            filter: { id: story.id },
-            data: story
+            filter: { id: existedDoc.id },
+            data: existedDoc
         })
 
+        patientRecord.updatedAt = new Date()
+        patientRecord.updatedBy = user
+
+        await mongodb.updateOne({
+            db: config.db,
+            collection: `${config.db.name}.${config.db.patientCollection}`,
+            filter: { patientId },
+            data: patientRecord
+        })
+
+
         res.status(200).send({
-            patientId: story.patientId,
-            locale: story.locale,
+            patientId,
+            documentType,
             validation: true
         })
 
@@ -801,6 +922,108 @@ const createStory = async (req, res) => {
     }
 }
 
+const createPS = async (req, res) => {
+    try {
+        
+        const user = req.body.user
+        let filename = req.body.filename
+        let url = req.body.url
+        let filepath = path.resolve(TARGET_DIR, filename)
+
+        let story = await loadForm(filepath)
+
+        if (story.validation != true) {
+            res.status(200).send(story)
+            return
+        }
+
+        let patientRecord = await mongodb.aggregate({
+            db: config.db,
+            collection: `${config.db.name}.${config.db.patientCollection}`,
+            pipeline: [{
+                $match: {
+                    patientId: story.patientId
+                },
+            }, ]
+        })
+
+        patientRecord = first(patientRecord)
+
+        if (!patientRecord) {
+            story.validation = `Cannot attach the Patient Story. Patient code "${story.patientId}" not found.`
+            res.status(200).send(story)
+            return
+        }
+
+        if (patientRecord.tags) {
+            res.status(200).send({
+                validation: `Story for ${story.patientId} already exists and annotated.`,
+                exists: true
+            })
+            return
+        }
+
+        let documentType = (story.locale == "en") ? "Patient Story (english)" : "Patient Story (original)"
+
+        let existedDoc = find( patientRecord.docs, d => d.type == documentType )
+
+        if(existedDoc){
+            story.id = existedDoc.id
+            existedDoc.url = url
+        } else {
+            story.id = uuid()
+            patientRecord.docs.push({
+                id: story.id,
+                type: documentType,
+                locale: story.locale,
+                url
+            })
+        }
+        
+        await mongodb.replaceOne({
+            db: config.db,
+            collection: `${config.db.name}.${config.db.docCollection}`,
+            filter: { id: story.id },
+            data: story
+        })
+
+        patientRecord.updatedAt = new Date()
+        patientRecord.updatedBy = user
+
+        await mongodb.updateOne({
+            db: config.db,
+            collection: `${config.db.name}.${config.db.patientCollection}`,
+            filter: { patientId: story.patientId },
+            data: patientRecord
+        })
+
+
+        res.status(200).send({
+            patientId: story.patientId,
+            documentType,
+            validation: true
+        })
+
+    } catch (e) {
+        res.status(200).send(e.toString())
+    }
+}
+
+
+const createStory = async (req, res) => {
+    try {
+
+        let ext = path.extname(req.body.filename)
+        if( ext.toUpperCase() == ".pdf".toUpperCase()){
+            await createSAF(req, res)
+        } else {
+            await createPS(req, res)
+        }
+
+    } catch (e) {
+        res.status(200).send(e.toString())
+    }
+}
 
 const getConfig = async (req, res) => {
 
@@ -847,6 +1070,71 @@ const getGrant = async (req, res) => {
 }
 
 
+
+const updateUrl = async (req, res) => {
+    try {
+        
+        let story = req.body
+
+        const user = req.body.user
+        let patientId = req.body.patientId
+        let url = req.body.url
+        let documentType = req.body.documentType
+        
+        let patientRecord = await mongodb.aggregate({
+            db: config.db,
+            collection: `${config.db.name}.${config.db.patientCollection}`,
+            pipeline: [{
+                $match: {
+                    patientId
+                },
+            }, ]
+        })
+
+        patientRecord = first(patientRecord)
+
+
+        if (!patientRecord) {
+            story.validation = `Cannot attach the Patient Story. Patient code "${story.patientId}" not found.`
+            res.status(200).send(story)
+            return
+        }
+
+        
+        let existedDoc = find( patientRecord.docs, d => d.type == documentType )
+
+        existedDoc.url = url
+        
+        await mongodb.updateOne({
+            db: config.db,
+            collection: `${config.db.name}.${config.db.docCollection}`,
+            filter: { id: existedDoc.id },
+            data: { url }
+        })
+
+        patientRecord.updatedAt = new Date()
+        patientRecord.updatedBy = user
+
+        await mongodb.updateOne({
+            db: config.db,
+            collection: `${config.db.name}.${config.db.patientCollection}`,
+            filter: { patientId },
+            data: patientRecord
+        })
+
+
+        res.status(200).send({
+            patientId: story.patientId,
+            documentType,
+            validation: true,
+            url
+        })
+
+    } catch (e) {
+        res.status(200).send(e.toString())
+    }
+}
+
 module.exports = {
     getGrant,
     getConfig,
@@ -855,5 +1143,6 @@ module.exports = {
     getCount,
     getList,
     updateStory,
-    createStory
+    createStory,
+    updateUrl
 }

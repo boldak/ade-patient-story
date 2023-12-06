@@ -12,7 +12,7 @@ let validators = {
 
 			d => ( d.patientId && /[A-Za-z0-9][A-Za-z0-9]+/.test(d.patientId)) ? true : `The Patient ID must be specified in the "${DEFAULT_LOCALE}" locale and must be valid Patient ID.`, 
 
-			d => ( d.gender ) ? true : `The Gender must not be empty.`, 
+			d => ( d.gender ) ? true : `The Sex must not be empty.`, 
 			
 			d => ( d.age && !Number.isNaN(d.age)) ? true : `The Age must not be empty and must be valid number.`, 
 			
@@ -28,7 +28,7 @@ let validators = {
 
 			d => ( d.patientId && /[A-Za-z0-9][A-Za-z0-9]+/.test(d.patientId) ) ? true : `The Patient ID must be specified in the "${DEFAULT_LOCALE}" locale and must be valid Patient ID.`, 
 
-			d => ( d.gender ) ? true : `The Gender must not be empty.`, 
+			d => ( d.gender ) ? true : `The Sex must not be empty.`, 
 			
 			d => ( d.age && !Number.isNaN(d.age)) ? true : `The Age must not be empty and must be valid number.`, 
 			
@@ -84,12 +84,12 @@ const templates = {
 	en: {
 	
 		patientId:{
-			select: /PATIENT CODE([\s\S]*)GENDER/m,
+			select: /PATIENT CODE([\s\S]*)SEX/m,
 			replace: [/[\_\s]/gm, ""],
 		},
 		
 		gender:{
-			select: /GENDER([\s\S]*)AGE/m,
+			select: /SEX([\s\S]*)AGE/m,
 			replace: [/[\_\s]/gm, ""],
 		},
 
