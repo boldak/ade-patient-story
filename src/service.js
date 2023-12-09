@@ -30,6 +30,20 @@ const DEFAULT_LOCALE = "en"
 const TARGET_DIR = path.resolve('./.tmp/uploads/')
 
 
+const getSortStage = filter => {
+    const name2field = {
+     "Patient ID": "patientId", 
+     "Docs": "docCount", 
+     "Updated at": "updatedAt"
+    }
+    let data = filter.sort.split(",").map( d => d.trim())
+    let res = {$sort:{}}
+    res.$sort[name2field[data[0]]] = (data[1] == "A-Z") ? 1 : -1
+
+    return res
+}
+
+
 const getCount = async (req, res) => {
     try {
 
@@ -40,6 +54,8 @@ const getCount = async (req, res) => {
         const withoutTags = (isUndefined(filter.withoutTags) || isNull(filter.withoutTags)) ? true : filter.withoutTags 
         const hasTags = (isUndefined(filter.hasTags) || isNull(filter.hasTags)) ? false : filter.hasTags 
         const requiredDocuments = (filter.hasDocs) ? filter.requiredDocuments || [] : [] 
+        const missingDocuments = (filter.misDocs) ? filter.missingDocuments || [] : [] 
+        
         const tags = (hasTags) ? filter.tags || [] : []
         
         let tagSelector = (tags.length > 0) 
@@ -116,6 +132,17 @@ const getCount = async (req, res) => {
             }]  
             : [] 
 
+        let misDocStage = (missingDocuments.length > 0) 
+            ? [
+                {
+                $match: {
+                    "docs.type": {
+                        $nin: missingDocuments,
+                    },
+                },
+            }]  
+            : [] 
+                
         let hasTagStage = [{
                 $lookup: {
                     from: config.db.docCollection,
@@ -192,24 +219,24 @@ const getCount = async (req, res) => {
         if(hasTags){
             
             if(withoutTags){
-                pipeline = pipeline.concat(patientStage).concat(docStage).concat(hasTagStage).concat([
+                pipeline = pipeline.concat(patientStage).concat(docStage).concat(misDocStage).concat(hasTagStage).concat([
                     {
                         $unionWith:{
                             coll: config.db.patientCollection,
-                            pipeline: [].concat(patientStage).concat(docStage).concat(withoutTagStage)
+                            pipeline: [].concat(patientStage).concat(docStage).concat(misDocStage).concat(withoutTagStage)
                         }    
                     }
                 ])
             } else {
-                pipeline = pipeline.concat(patientStage).concat(docStage).concat(hasTagStage)
+                pipeline = pipeline.concat(patientStage).concat(docStage).concat(misDocStage).concat(hasTagStage)
             }
         
         } else {
         
             if(withoutTags){
-                pipeline = pipeline.concat(patientStage).concat(docStage).concat(withoutTagStage)
+                pipeline = pipeline.concat(patientStage).concat(docStage).concat(misDocStage).concat(withoutTagStage)
             } else {
-                pipeline = pipeline.concat(patientStage).concat(docStage)       
+                pipeline = pipeline.concat(patientStage).concat(docStage).concat(misDocStage)       
             }
         }
 
@@ -259,6 +286,8 @@ const getList = async (req, res) => {
         const withoutTags = (isUndefined(filter.withoutTags) || isNull(filter.withoutTags)) ? true : filter.withoutTags 
         const hasTags = (isUndefined(filter.hasTags) || isNull(filter.hasTags)) ? false : filter.hasTags 
         const requiredDocuments = (filter.hasDocs) ? filter.requiredDocuments || [] : [] 
+        const missingDocuments = (filter.misDocs) ? filter.missingDocuments || [] : [] 
+        
         const tags = (hasTags) ? filter.tags || [] : []
         
         let tagSelector = (tags.length > 0) 
@@ -334,6 +363,18 @@ const getList = async (req, res) => {
                 },
             }]  
             : [] 
+
+        let misDocStage = (missingDocuments.length > 0) 
+            ? [
+                {
+                $match: {
+                    "docs.type": {
+                        $nin: missingDocuments,
+                    },
+                },
+            }]  
+            : [] 
+
 
         let hasTagStage = [{
                 $lookup: {
@@ -411,36 +452,43 @@ const getList = async (req, res) => {
         if(hasTags){
             
             if(withoutTags){
-                pipeline = pipeline.concat(patientStage).concat(docStage).concat(hasTagStage).concat([
+                pipeline = pipeline.concat(patientStage).concat(docStage).concat(misDocStage).concat(hasTagStage).concat([
                     {
                         $unionWith:{
                             coll: config.db.patientCollection,
-                            pipeline: [].concat(patientStage).concat(docStage).concat(withoutTagStage)
+                            pipeline: [].concat(patientStage).concat(docStage).concat(misDocStage).concat(withoutTagStage)
                         }    
                     }
                 ])
             } else {
-                pipeline = pipeline.concat(patientStage).concat(docStage).concat(hasTagStage)
+                pipeline = pipeline.concat(patientStage).concat(docStage).concat(misDocStage).concat(hasTagStage)
             }
         
         } else {
         
             if(withoutTags){
-                pipeline = pipeline.concat(patientStage).concat(docStage).concat(withoutTagStage)
+                pipeline = pipeline.concat(patientStage).concat(docStage).concat(misDocStage).concat(withoutTagStage)
             } else {
-                pipeline = pipeline.concat(patientStage).concat(docStage)       
+                pipeline = pipeline.concat(patientStage).concat(docStage).concat(misDocStage)       
             }
         }
 
         pipeline = pipeline
                 .concat(aggregateStage)
                 .concat([
-
                     {
-                        $sort: {
-                            updatedAt: -1,
-                        },
+                        $addFields:{
+                            docCount:{
+                                $size: "$docs"
+                            }
+                        }
                     },
+                    getSortStage(filter),
+                    // {
+                    //     $sort: {
+                    //         updatedAt: -1,
+                    //     },
+                    // },
 
                     {
                         $skip: pagination.skip,
