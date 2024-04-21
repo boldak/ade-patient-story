@@ -56,6 +56,11 @@ const getCount = async (req, res) => {
         const requiredDocuments = (filter.hasDocs) ? filter.requiredDocuments || [] : [] 
         const missingDocuments = (filter.misDocs) ? filter.missingDocuments || [] : [] 
         
+        const hasStoryText = (isUndefined(filter.hasStoryText) || isNull(filter.hasStoryText)) ? false : filter.hasStoryText 
+        const storyText = (filter.storyText) ? filter.storyText || "" : ""
+        
+
+
         const tags = (hasTags) ? filter.tags || [] : []
         
         let tagSelector = (tags.length > 0) 
@@ -131,6 +136,40 @@ const getCount = async (req, res) => {
                 },
             }]  
             : [] 
+
+         let storyTextStage = (hasStoryText && storyText)
+                    ? [
+                        {
+                            $lookup:
+                              {
+                                from: "docs",
+                                localField: "docs.id",
+                                foreignField: "id",
+                                as: "result",
+                              },
+                          },
+                          {
+                            $addFields:
+                              {
+                                story: "$result.story",
+                              },
+                          },
+                          {
+                            $project:
+                              {
+                                result: 0,
+                              },
+                          },
+                        {
+                            $match:{
+                                "story": {
+                                    $regex: storyText
+                                }
+                            }    
+                        }
+                    ]
+                    : []
+       
 
         let misDocStage = (missingDocuments.length > 0) 
             ? [
@@ -241,6 +280,7 @@ const getCount = async (req, res) => {
         }
 
         pipeline = pipeline
+                .concat(storyTextStage)
                 .concat([
                     {
                         $group:{
@@ -287,6 +327,10 @@ const getList = async (req, res) => {
         const hasTags = (isUndefined(filter.hasTags) || isNull(filter.hasTags)) ? false : filter.hasTags 
         const requiredDocuments = (filter.hasDocs) ? filter.requiredDocuments || [] : [] 
         const missingDocuments = (filter.misDocs) ? filter.missingDocuments || [] : [] 
+
+        const hasStoryText = (isUndefined(filter.hasStoryText) || isNull(filter.hasStoryText)) ? false : filter.hasStoryText 
+        const storyText = (filter.storyText) ? filter.storyText || "" : ""
+        
         
         const tags = (hasTags) ? filter.tags || [] : []
         
@@ -355,6 +399,7 @@ const getList = async (req, res) => {
 
         let docStage = (requiredDocuments.length > 0) 
             ? [
+                    
                 {
                 $match: {
                     "docs.type": {
@@ -363,6 +408,41 @@ const getList = async (req, res) => {
                 },
             }]  
             : [] 
+
+        
+        let storyTextStage = (hasStoryText && storyText)
+                    ? [
+                        {
+                            $lookup:
+                              {
+                                from: "docs",
+                                localField: "docs.id",
+                                foreignField: "id",
+                                as: "result",
+                              },
+                          },
+                          {
+                            $addFields:
+                              {
+                                story: "$result.story",
+                              },
+                          },
+                          {
+                            $project:
+                              {
+                                result: 0,
+                              },
+                          },
+                        {
+                            $match:{
+                                "story": {
+                                    $regex: storyText
+                                }
+                            }    
+                        }
+                    ]
+                    : []
+                    
 
         let misDocStage = (missingDocuments.length > 0) 
             ? [
@@ -482,7 +562,11 @@ const getList = async (req, res) => {
                                 $size: "$docs"
                             }
                         }
-                    },
+                    }
+                ])
+                .concat(storyTextStage)
+                .concat([    
+
                     getSortStage(filter),
                     // {
                     //     $sort: {
@@ -499,6 +583,9 @@ const getList = async (req, res) => {
                     }
 
                 ])
+
+
+        // console.log(JSON.stringify(pipeline, null, " "))    
 
 
         let result = await mongodb.aggregate({
