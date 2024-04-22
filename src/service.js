@@ -7,17 +7,17 @@ const loadYaml = filename => YAML.load(fs.readFileSync(path.resolve(filename)).t
 
 const config = loadYaml(path.join(__dirname, "../.config/db/mongodb.conf.yml"))
 
-const { 
-        extend, 
-        keys, 
-        find, 
-        isArray, 
-        groupBy, 
-        remove, 
-        first,
-        isUndefined,
-        isNull,
-        flattenDeep 
+const {
+    extend,
+    keys,
+    find,
+    isArray,
+    groupBy,
+    remove,
+    first,
+    isUndefined,
+    isNull,
+    flattenDeep
 } = require("lodash")
 
 
@@ -32,12 +32,12 @@ const TARGET_DIR = path.resolve('./.tmp/uploads/')
 
 const getSortStage = filter => {
     const name2field = {
-     "Patient ID": "patientId", 
-     "Docs": "docCount", 
-     "Updated at": "updatedAt"
+        "Patient ID": "patientId",
+        "Docs": "docCount",
+        "Updated at": "updatedAt"
     }
-    let data = filter.sort.split(",").map( d => d.trim())
-    let res = {$sort:{}}
+    let data = filter.sort.split(",").map(d => d.trim())
+    let res = { $sort: {} }
     res.$sort[name2field[data[0]]] = (data[1] == "A-Z") ? 1 : -1
 
     return res
@@ -47,31 +47,31 @@ const getSortStage = filter => {
 const getCount = async (req, res) => {
     try {
 
-                const filter = req.body.filter || {}
+        const filter = req.body.filter || {}
 
         const textSearch = (filter.hasText) ? filter.search || "" : ""
         const pid = (filter.hasPatients) ? filter.patientId || ".*" : ".*"
-        const withoutTags = (isUndefined(filter.withoutTags) || isNull(filter.withoutTags)) ? true : filter.withoutTags 
-        const hasTags = (isUndefined(filter.hasTags) || isNull(filter.hasTags)) ? false : filter.hasTags 
-        const requiredDocuments = (filter.hasDocs) ? filter.requiredDocuments || [] : [] 
-        const missingDocuments = (filter.misDocs) ? filter.missingDocuments || [] : [] 
-        
-        const hasStoryText = (isUndefined(filter.hasStoryText) || isNull(filter.hasStoryText)) ? false : filter.hasStoryText 
+        const withoutTags = (isUndefined(filter.withoutTags) || isNull(filter.withoutTags)) ? true : filter.withoutTags
+        const hasTags = (isUndefined(filter.hasTags) || isNull(filter.hasTags)) ? false : filter.hasTags
+        const requiredDocuments = (filter.hasDocs) ? filter.requiredDocuments || [] : []
+        const missingDocuments = (filter.misDocs) ? filter.missingDocuments || [] : []
+
+        const hasStoryText = (isUndefined(filter.hasStoryText) || isNull(filter.hasStoryText)) ? false : filter.hasStoryText
         const storyText = (filter.storyText) ? filter.storyText || "" : ""
-        
+
 
 
         const tags = (hasTags) ? filter.tags || [] : []
-        
-        let tagSelector = (tags.length > 0) 
-            ? {
+
+        let tagSelector = (tags.length > 0) ?
+            {
                 $match: {
                     tag: {
                         $in: tags,
                     },
                 },
-            }
-            : { $match: {} }
+            } :
+            { $match: {} }
 
 
 
@@ -88,26 +88,24 @@ const getCount = async (req, res) => {
         } : { $match: {} }
 
 
-        let patientStage = [
-            {
+        let patientStage = [{
                 $addFields: {
-                  docsCount: {
-                    $size: "$docs",
-                  },
-                  hasTags: {
-                    $cond: {
-                      if: {
-                        $eq: [
-                          {
-                            $type: "$tags",
-                          },
-                          "missing",
-                        ],
-                      },
-                      then: false,
-                      else: true,
+                    docsCount: {
+                        $size: "$docs",
                     },
-                  },
+                    hasTags: {
+                        $cond: {
+                            if: {
+                                $eq: [{
+                                        $type: "$tags",
+                                    },
+                                    "missing",
+                                ],
+                            },
+                            then: false,
+                            else: true,
+                        },
+                    },
                 },
             },
             {
@@ -126,62 +124,74 @@ const getCount = async (req, res) => {
             }
         ]
 
-        let docStage = (requiredDocuments.length > 0) 
-            ? [
-                {
+        let docStage = (requiredDocuments.length > 0) ?
+            [{
                 $match: {
                     "docs.type": {
                         $all: requiredDocuments,
                     },
                 },
-            }]  
-            : [] 
+            }] :
+            []
 
-         let storyTextStage = (hasStoryText && storyText)
-                    ? [
-                        {
-                            $lookup:
-                              {
-                                from: "docs",
-                                localField: "docs.id",
-                                foreignField: "id",
-                                as: "result",
-                              },
-                          },
-                          {
-                            $addFields:
-                              {
-                                story: "$result.story",
-                              },
-                          },
-                          {
-                            $project:
-                              {
-                                result: 0,
-                              },
-                          },
-                        {
-                            $match:{
-                                "story": {
-                                    $regex: storyText
-                                }
-                            }    
-                        }
-                    ]
-                    : []
-       
-
-        let misDocStage = (missingDocuments.length > 0) 
-            ? [
+          let storyTextStage = (hasStoryText && storyText) ?
+            [{
+                    $lookup:
+                    {
+                        from: "docs",
+                        localField: "docs.id",
+                        foreignField: "id",
+                        as: "search",
+                        pipeline: [{
+                                $search: {
+                                    index: "story_text_index",
+                                    queryString: {
+                                        query: storyText,
+                                        defaultPath: "story",
+                                    },
+                                    highlight: {
+                                        path: ["story"],
+                                    },
+                                },
+                            },
+                            {
+                                $project:
+                                {
+                                    _id: 0,
+                                    score: {
+                                        $meta: "searchScore",
+                                    },
+                                    highlights: {
+                                        $meta: "searchHighlights",
+                                    },
+                                },
+                            },
+                        ],
+                    },
+                },
                 {
+                    $match:
+                    {
+                        search: {
+                            $not: {
+                                $size: 0,
+                            },
+                        },
+                    },
+                },
+            ] : []
+
+
+        let misDocStage = (missingDocuments.length > 0) ?
+            [{
                 $match: {
                     "docs.type": {
                         $nin: missingDocuments,
                     },
                 },
-            }]  
-            : [] 
-                
+            }] :
+            []
+
         let hasTagStage = [{
                 $lookup: {
                     from: config.db.docCollection,
@@ -217,16 +227,13 @@ const getCount = async (req, res) => {
         ]
 
 
-        let withoutTagStage = [
-            {
-                $match:{
-                    hasTags: false
-                }
+        let withoutTagStage = [{
+            $match: {
+                hasTags: false
             }
-        ]
+        }]
 
-        let aggregateStage = [
-                {
+        let aggregateStage = [{
                 $group: {
                     _id: "$patientId",
                 },
@@ -255,42 +262,39 @@ const getCount = async (req, res) => {
 
         let pipeline = []
 
-        if(hasTags){
-            
-            if(withoutTags){
-                pipeline = pipeline.concat(patientStage).concat(docStage).concat(misDocStage).concat(hasTagStage).concat([
-                    {
-                        $unionWith:{
-                            coll: config.db.patientCollection,
-                            pipeline: [].concat(patientStage).concat(docStage).concat(misDocStage).concat(withoutTagStage)
-                        }    
+        if (hasTags) {
+
+            if (withoutTags) {
+                pipeline = pipeline.concat(patientStage).concat(docStage).concat(misDocStage).concat(hasTagStage).concat([{
+                    $unionWith: {
+                        coll: config.db.patientCollection,
+                        pipeline: [].concat(patientStage).concat(docStage).concat(misDocStage).concat(withoutTagStage)
                     }
-                ])
+                }])
             } else {
                 pipeline = pipeline.concat(patientStage).concat(docStage).concat(misDocStage).concat(hasTagStage)
             }
-        
+
         } else {
-        
-            if(withoutTags){
+
+            if (withoutTags) {
                 pipeline = pipeline.concat(patientStage).concat(docStage).concat(misDocStage).concat(withoutTagStage)
             } else {
-                pipeline = pipeline.concat(patientStage).concat(docStage).concat(misDocStage)       
+                pipeline = pipeline.concat(patientStage).concat(docStage).concat(misDocStage)
             }
         }
 
         pipeline = pipeline
-                .concat(storyTextStage)
-                .concat([
-                    {
-                        $group:{
-                            _id: "$patientId"
-                        }
-                    },
-                    {
-                        $count: "count"
+            .concat(storyTextStage)
+            .concat([{
+                    $group: {
+                        _id: "$patientId"
                     }
-                ])
+                },
+                {
+                    $count: "count"
+                }
+            ])
 
         // console.log(JSON.stringify(pipeline))
 
@@ -301,7 +305,7 @@ const getCount = async (req, res) => {
             pipeline
         })
 
-        
+
         res.status(200).send(result[0])
 
     } catch (e) {
@@ -323,26 +327,26 @@ const getList = async (req, res) => {
 
         const textSearch = (filter.hasText) ? filter.search || "" : ""
         const pid = (filter.hasPatients) ? filter.patientId || ".*" : ".*"
-        const withoutTags = (isUndefined(filter.withoutTags) || isNull(filter.withoutTags)) ? true : filter.withoutTags 
-        const hasTags = (isUndefined(filter.hasTags) || isNull(filter.hasTags)) ? false : filter.hasTags 
-        const requiredDocuments = (filter.hasDocs) ? filter.requiredDocuments || [] : [] 
-        const missingDocuments = (filter.misDocs) ? filter.missingDocuments || [] : [] 
+        const withoutTags = (isUndefined(filter.withoutTags) || isNull(filter.withoutTags)) ? true : filter.withoutTags
+        const hasTags = (isUndefined(filter.hasTags) || isNull(filter.hasTags)) ? false : filter.hasTags
+        const requiredDocuments = (filter.hasDocs) ? filter.requiredDocuments || [] : []
+        const missingDocuments = (filter.misDocs) ? filter.missingDocuments || [] : []
 
-        const hasStoryText = (isUndefined(filter.hasStoryText) || isNull(filter.hasStoryText)) ? false : filter.hasStoryText 
+        const hasStoryText = (isUndefined(filter.hasStoryText) || isNull(filter.hasStoryText)) ? false : filter.hasStoryText
         const storyText = (filter.storyText) ? filter.storyText || "" : ""
-        
-        
+
+
         const tags = (hasTags) ? filter.tags || [] : []
-        
-        let tagSelector = (tags.length > 0) 
-            ? {
+
+        let tagSelector = (tags.length > 0) ?
+            {
                 $match: {
                     tag: {
                         $in: tags,
                     },
                 },
-            }
-            : { $match: {} }
+            } :
+            { $match: {} }
 
 
 
@@ -359,26 +363,24 @@ const getList = async (req, res) => {
         } : { $match: {} }
 
 
-        let patientStage = [
-            {
+        let patientStage = [{
                 $addFields: {
-                  docsCount: {
-                    $size: "$docs",
-                  },
-                  hasTags: {
-                    $cond: {
-                      if: {
-                        $eq: [
-                          {
-                            $type: "$tags",
-                          },
-                          "missing",
-                        ],
-                      },
-                      then: false,
-                      else: true,
+                    docsCount: {
+                        $size: "$docs",
                     },
-                  },
+                    hasTags: {
+                        $cond: {
+                            if: {
+                                $eq: [{
+                                        $type: "$tags",
+                                    },
+                                    "missing",
+                                ],
+                            },
+                            then: false,
+                            else: true,
+                        },
+                    },
                 },
             },
             {
@@ -397,63 +399,115 @@ const getList = async (req, res) => {
             }
         ]
 
-        let docStage = (requiredDocuments.length > 0) 
-            ? [
-                    
+        let docStage = (requiredDocuments.length > 0) ?
+            [
+
                 {
-                $match: {
-                    "docs.type": {
-                        $all: requiredDocuments,
+                    $match: {
+                        "docs.type": {
+                            $all: requiredDocuments,
+                        },
+                    },
+                }
+            ] :
+            []
+
+
+
+
+
+
+        let storyTextStage = (hasStoryText && storyText) ?
+            [{
+                    $lookup:
+                    {
+                        from: "docs",
+                        localField: "docs.id",
+                        foreignField: "id",
+                        as: "search",
+                        pipeline: [{
+                                $search: {
+                                    index: "story_text_index",
+                                    queryString: {
+                                        query: storyText,
+                                        defaultPath: "story",
+                                    },
+                                    highlight: {
+                                        path: ["story"],
+                                    },
+                                },
+                            },
+                            {
+                                $project:
+                                {
+                                    _id: 0,
+                                    score: {
+                                        $meta: "searchScore",
+                                    },
+                                    highlights: {
+                                        $meta: "searchHighlights",
+                                    },
+                                },
+                            },
+                        ],
                     },
                 },
-            }]  
-            : [] 
-
-        
-        let storyTextStage = (hasStoryText && storyText)
-                    ? [
-                        {
-                            $lookup:
-                              {
-                                from: "docs",
-                                localField: "docs.id",
-                                foreignField: "id",
-                                as: "result",
-                              },
-                          },
-                          {
-                            $addFields:
-                              {
-                                story: "$result.story",
-                              },
-                          },
-                          {
-                            $project:
-                              {
-                                result: 0,
-                              },
-                          },
-                        {
-                            $match:{
-                                "story": {
-                                    $regex: storyText
-                                }
-                            }    
-                        }
-                    ]
-                    : []
-                    
-
-        let misDocStage = (missingDocuments.length > 0) 
-            ? [
                 {
+                    $match:
+                    {
+                        search: {
+                            $not: {
+                                $size: 0,
+                            },
+                        },
+                    },
+                },
+            ] : []
+
+
+        // let storyTextStage = (hasStoryText && storyText)
+        //             ? [
+        //                 {
+        //                     $lookup:
+        //                       {
+        //                         from: "docs",
+        //                         localField: "docs.id",
+        //                         foreignField: "id",
+        //                         as: "result",
+        //                       },
+        //                   },
+        //                   {
+        //                     $addFields:
+        //                       {
+        //                         story: "$result.story",
+        //                       },
+        //                   },
+        //                   {
+        //                     $project:
+        //                       {
+        //                         result: 0,
+        //                       },
+        //                   },
+        //                 {
+        //                     $match:{
+        //                         "story": {
+        //                             $regex: storyText
+        //                         }
+        //                     }    
+        //                 }
+        //             ]
+        //             : []
+
+
+        let misDocStage = (missingDocuments.length > 0) ?
+            [{
                 $match: {
                     "docs.type": {
                         $nin: missingDocuments,
                     },
                 },
-            }]  
-            : [] 
+            }] :
+            []
 
 
         let hasTagStage = [{
@@ -491,16 +545,13 @@ const getList = async (req, res) => {
         ]
 
 
-        let withoutTagStage = [
-            {
-                $match:{
-                    hasTags: false
-                }
+        let withoutTagStage = [{
+            $match: {
+                hasTags: false
             }
-        ]
+        }]
 
-        let aggregateStage = [
-                {
+        let aggregateStage = [{
                 $group: {
                     _id: "$patientId",
                 },
@@ -529,63 +580,59 @@ const getList = async (req, res) => {
 
         let pipeline = []
 
-        if(hasTags){
-            
-            if(withoutTags){
-                pipeline = pipeline.concat(patientStage).concat(docStage).concat(misDocStage).concat(hasTagStage).concat([
-                    {
-                        $unionWith:{
-                            coll: config.db.patientCollection,
-                            pipeline: [].concat(patientStage).concat(docStage).concat(misDocStage).concat(withoutTagStage)
-                        }    
+        if (hasTags) {
+
+            if (withoutTags) {
+                pipeline = pipeline.concat(patientStage).concat(docStage).concat(misDocStage).concat(hasTagStage).concat([{
+                    $unionWith: {
+                        coll: config.db.patientCollection,
+                        pipeline: [].concat(patientStage).concat(docStage).concat(misDocStage).concat(withoutTagStage)
                     }
-                ])
+                }])
             } else {
                 pipeline = pipeline.concat(patientStage).concat(docStage).concat(misDocStage).concat(hasTagStage)
             }
-        
+
         } else {
-        
-            if(withoutTags){
+
+            if (withoutTags) {
                 pipeline = pipeline.concat(patientStage).concat(docStage).concat(misDocStage).concat(withoutTagStage)
             } else {
-                pipeline = pipeline.concat(patientStage).concat(docStage).concat(misDocStage)       
+                pipeline = pipeline.concat(patientStage).concat(docStage).concat(misDocStage)
             }
         }
 
         pipeline = pipeline
-                .concat(aggregateStage)
-                .concat([
-                    {
-                        $addFields:{
-                            docCount:{
-                                $size: "$docs"
-                            }
-                        }
+            .concat(aggregateStage)
+            .concat([{
+                $addFields: {
+                    docCount: {
+                        $size: "$docs"
                     }
-                ])
-                .concat(storyTextStage)
-                .concat([    
+                }
+            }])
+            .concat(storyTextStage)
+            .concat([
 
-                    getSortStage(filter),
-                    // {
-                    //     $sort: {
-                    //         updatedAt: -1,
-                    //     },
-                    // },
+                getSortStage(filter),
+                // {
+                //     $sort: {
+                //         updatedAt: -1,
+                //     },
+                // },
 
-                    {
-                        $skip: pagination.skip,
-                    },
+                {
+                    $skip: pagination.skip,
+                },
 
-                    {
-                        $limit: pagination.limit,
-                    }
+                {
+                    $limit: pagination.limit,
+                }
 
-                ])
+            ])
 
 
-        // console.log(JSON.stringify(pipeline, null, " "))    
+        // console.log(JSON.stringify(pipeline, null, " "))
 
 
         let result = await mongodb.aggregate({
@@ -668,7 +715,7 @@ const updateStory = async (req, res) => {
         let foundedTags = []
 
         for (let i = 0; i < story.docs.length; i++) {
-            
+
             let storyEntities = ((story.docs[i]) ? story.docs[i].storyEntities : []) || []
             let reviewEntities = ((story.docs[i]) ? story.docs[i].reviewEntities : []) || []
 
@@ -700,7 +747,7 @@ const updateStory = async (req, res) => {
         }
 
         // console.log(foundedTags)
-        
+
         let tags = groupBy(foundedTags, t => t.tag)
 
         tags = keys(tags).map(key => ({
@@ -710,18 +757,18 @@ const updateStory = async (req, res) => {
 
         // console.log(tags)
 
-        if(tags.length == 0){
+        if (tags.length == 0) {
             delete patientRecord.tags
         } else {
             patientRecord.tags = tags
         }
 
         await mongodb.replaceOne({
-                db: config.db,
-                collection: `${config.db.name}.${config.db.patientCollection}`,
-                filter: { patientId },
-                data: patientRecord
-            })
+            db: config.db,
+            collection: `${config.db.name}.${config.db.patientCollection}`,
+            filter: { patientId },
+            data: patientRecord
+        })
 
 
         res.status(200).send()
@@ -891,7 +938,7 @@ const getStory = async (req, res) => {
             },
         ]
 
-         let result = await mongodb.aggregate({
+        let result = await mongodb.aggregate({
 
             db: config.db,
             collection: `${config.db.name}.${config.db.patientCollection}`,
@@ -924,10 +971,10 @@ const getStory = async (req, res) => {
         }
 
         result = result[0] || {}
-            
+
         result.lockedBy = patientRecord.lockedBy
         result.lockedAt = patientRecord.lockedAt
-        
+
 
         res.status(200).send(result)
 
@@ -962,14 +1009,14 @@ const releaseStory = async (req, res) => {
 
             patientRecord.lockedBy = null
             patientRecord.lockedAt = null
-            
+
             await mongodb.updateOne({
                 db: config.db,
                 collection: `${config.db.name}.${config.db.patientCollection}`,
                 filter: { patientId },
                 data: patientRecord
             })
-        
+
         }
 
         res.status(200).send()
@@ -985,12 +1032,12 @@ const releaseStory = async (req, res) => {
 
 const createSAF = async (req, res) => {
     try {
-        
+
         const user = req.body.user
         let filename = req.body.filename
         let url = req.body.url
-        let patientId = path.basename(filename,".pdf")
-       
+        let patientId = path.basename(filename, ".pdf")
+
         let patientRecord = await mongodb.aggregate({
             db: config.db,
             collection: `${config.db.name}.${config.db.patientCollection}`,
@@ -1011,23 +1058,23 @@ const createSAF = async (req, res) => {
             return
         }
 
-        
+
         let documentType = "Sound Assessment Form"
 
-        let existedDoc = find( patientRecord.docs, d => d.type == documentType )
+        let existedDoc = find(patientRecord.docs, d => d.type == documentType)
 
-        if(existedDoc){
+        if (existedDoc) {
             existedDoc.url = url
         } else {
             existedDoc = {
                 id: uuid(),
                 patientId,
                 type: documentType,
-                url    
+                url
             }
             patientRecord.docs.push(existedDoc)
         }
-        
+
         await mongodb.replaceOne({
             db: config.db,
             collection: `${config.db.name}.${config.db.docCollection}`,
@@ -1059,7 +1106,7 @@ const createSAF = async (req, res) => {
 
 const createPS = async (req, res) => {
     try {
-        
+
         const user = req.body.user
         let filename = req.body.filename
         let url = req.body.url
@@ -1100,9 +1147,9 @@ const createPS = async (req, res) => {
 
         let documentType = (story.locale == "en") ? "Patient Story (english)" : "Patient Story (original)"
 
-        let existedDoc = find( patientRecord.docs, d => d.type == documentType )
+        let existedDoc = find(patientRecord.docs, d => d.type == documentType)
 
-        if(existedDoc){
+        if (existedDoc) {
             story.id = existedDoc.id
             existedDoc.url = url
         } else {
@@ -1114,7 +1161,7 @@ const createPS = async (req, res) => {
                 url
             })
         }
-        
+
         await mongodb.replaceOne({
             db: config.db,
             collection: `${config.db.name}.${config.db.docCollection}`,
@@ -1149,7 +1196,7 @@ const createStory = async (req, res) => {
     try {
 
         let ext = path.extname(req.body.filename)
-        if( ext.toUpperCase() == ".pdf".toUpperCase()){
+        if (ext.toUpperCase() == ".pdf".toUpperCase()) {
             await createSAF(req, res)
         } else {
             await createPS(req, res)
@@ -1208,14 +1255,14 @@ const getGrant = async (req, res) => {
 
 const updateUrl = async (req, res) => {
     try {
-        
+
         let story = req.body
 
         const user = req.body.user
         let patientId = req.body.patientId
         let url = req.body.url
         let documentType = req.body.documentType
-        
+
         let patientRecord = await mongodb.aggregate({
             db: config.db,
             collection: `${config.db.name}.${config.db.patientCollection}`,
@@ -1235,11 +1282,11 @@ const updateUrl = async (req, res) => {
             return
         }
 
-        
-        let existedDoc = find( patientRecord.docs, d => d.type == documentType )
+
+        let existedDoc = find(patientRecord.docs, d => d.type == documentType)
 
         existedDoc.url = url
-        
+
         await mongodb.updateOne({
             db: config.db,
             collection: `${config.db.name}.${config.db.docCollection}`,
